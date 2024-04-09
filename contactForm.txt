@@ -1,0 +1,389 @@
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+                                           LARAVEL CONTACT FORM WITH ATACHED FILE
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+Step 1: Install Laravel 
+   
+        composer create-project laravel/laravel example-app
+
+Step 2: Create a Model with Migrations Table 
+      
+        php artisan make:model Contact/Contact -m
+
+        add this code to Model
+
+        protected $table = 'contacts';
+         protected $fillable = [
+        'id',
+        'customer_name',
+        'customer_email',
+        'phone',
+        'subject',
+        'message',
+        'customer_file',
+        'status',
+        'deleted_at',
+    ];
+
+Step 3: Fill Data Base Table
+
+        Schema::create('contacts', function (Blueprint $table) {
+            $table->id();
+            $table->string('customer_name');
+            $table->string('customer_email');
+            $table->string('phone')->nullable();
+            $table->string('subject');
+            $table->string('message');
+            $table->string('customer_file')->nullable();
+            $table->tinyInteger('status')->default(0);
+            $table->softDeletes();
+            $table->timestamps();
+        });
+
+Step 4: Make Email Configuration Update SMTP Details in .env File
+
+Step 5: Add Routes
+
+        // Contact System Area
+            Route::get('/contact', [ContactController::class, 'index'])->name('contact');
+            Route::post('/contact/store', [ContactController::class, 'store'])->name('contact.store');
+
+Step 6: Create Controller in folder project directory
+
+        php artisan make:controller ContactController
+      
+        Now, update code on ContactController file.
+
+        namespace App\Http\Controllers\WebApp\Contact;
+
+       use App\Http\Controllers\Controller;
+       use Illuminate\Http\Request;
+       use Illuminate\Support\Facades\Mail;
+       use App\Mail\SendMail;
+       use App\Mail\SendMessageToEndUser;
+       use App\Mail\ContactMail;
+       use App\Models\Contact\Contact;
+       use Validator;
+
+      class ContactController extends Controller {
+
+      public function index() {
+        return view('webapp.contact.contact');
+      }
+
+       public function store(Request $request) {
+        $rules = [
+            'customer_name' => 'required|string|max:100',
+            'customer_email' => 'required|email|max:100',
+            'phone' => 'required|regex:/^([0-9\s\-\+\(\)]*)$/|max:20',
+            'subject' => 'required|string|max:100',
+            'message' => 'required|string|max:400',
+            'customer_file' => 'file|mimes:pdf,doc,docx,txt,xlsx,csv,zip,jpg,png,jpeg,svg|max:1048576',
+        ];
+
+        $validator = Validator::make($request->all(), $rules);
+        if ($validator->fails()) {
+            flash()->addError($validator->errors()->first());
+            return back();
+        }
+
+        $fileNameToStore = '';
+        if ($request->hasFile('customer_file')) {
+            $filenameWithExt = $request->file('customer_file')->getClientOriginalName();
+            $filename = pathinfo($filenameWithExt, PATHINFO_FILENAME);
+            $extension = $request->file('customer_file')->getClientOriginalExtension();
+            $fileNameToStore = $filename . '_' . time() . '.' . $extension;
+
+            $request->file('customer_file')->storeAs('public/customerFile/', $fileNameToStore);
+        }
+
+        // Send Email
+        $customer_name = $request->customer_name;
+        $customer_email = $request->customer_email;
+        $phone = $request->phone;
+        $subject = $request->subject;
+        $message = $request->message;
+
+        $mailData = ['url' => config('app.url')];
+
+        $send_mail = "nikolino_nik@abv.bg";
+
+        $mail = new ContactMail($customer_name, $customer_email, $phone, $subject, $message, $fileNameToStore);
+        if (!empty($fileNameToStore)) {
+            $mail->attach(storage_path('app/public/customerFile/' . $fileNameToStore));
+        }
+        Mail::to($send_mail)->send($mail);
+
+        $senderMessage = __('Thanks for your message , we will reply you in later.');
+        Mail::to($customer_email)->send(new SendMessageToEndUser($customer_name, $senderMessage, $mailData));
+
+        Contact::create([
+            'customer_name' => e($customer_name),
+            'customer_email' => e($customer_email),
+            'phone' => e($phone),
+            'subject' => e($subject),
+            'message' => e($message),
+            'customer_file' => $fileNameToStore,
+        ]);
+        flash()->addSuccess(__('Thank you for contact us. We will contact you shortly.'));
+        return redirect()->back();
+    }
+}
+
+
+Step 7: Generating Mailable Class with Markdown (Two Part)
+        Part — 7.1: Send Email to Admin
+
+        To generate a mailable with a corresponding Markdown template, you may use the 
+        — markdown option of the make:mail Artisan command. So, let’s run bellow command.
+
+        php artisan make:mail ContactMail --markdown=ContactMail
+
+        now, let’s update code on ContactMail.php file as bellow:
+
+        app/Mail/ContactMail.php
+
+        use Illuminate\Bus\Queueable;
+        use Illuminate\Contracts\Queue\ShouldQueue;
+        use Illuminate\Mail\Mailable;
+        use Illuminate\Mail\Mailables\Content;
+        use Illuminate\Mail\Mailables\Envelope;
+        use Illuminate\Queue\SerializesModels;
+
+
+        class ContactMail extends Mailable
+{
+    use Queueable, SerializesModels;
+
+    /**
+     * Create a new message instance.
+     */
+    public $customer_name, $customer_email, $phone, $subject, $message;
+    public function __construct($customer_name, $customer_email, $phone, $subject, $message)
+    {
+        $this->customer_name = $customer_name;
+        $this->customer_email = $customer_email;
+        $this->phone = $phone;
+        $this->subject = $subject;
+        $this->message = $message;
+    }
+
+    /**
+     * Get the message envelope.
+     */
+    public function envelope(): Envelope
+    {
+        return new Envelope(
+           // subject: 'Contact Mail',
+                subject: $this->subject,
+        );
+    }
+
+    /**
+     * Get the message content definition.
+     */
+    public function content(): Content
+    {
+        return new Content(
+           // markdown: 'ContactMail',
+                markdown: 'webapp.contact.email_to_admin',
+        );
+    }
+
+    /**
+     * Get the attachments for the message.
+     *
+     * @return array<int, \Illuminate\Mail\Mailables\Attachment>
+     */
+    public function attachments(): array
+    {
+        return [];
+    }
+}
+
+
+      Part — 2.2: Send Reply Email to User
+
+      To generate a mailable with a corresponding Markdown template, you may use the 
+      — markdown option of the make:mail Artisan command. So, let’s run bellow command.
+
+      php artisan make:mail SendMessageToEndUser --markdown=SendMessageToEndUser
+
+      now, let’s update code on SendMessageToEndUser.php file as bellow:
+
+      app/Mail/SendMessageToEndUser.php
+
+      use Illuminate\Bus\Queueable;
+      use Illuminate\Contracts\Queue\ShouldQueue;
+      use Illuminate\Mail\Mailable;
+      use Illuminate\Mail\Mailables\Content;
+      use Illuminate\Mail\Mailables\Envelope;
+      use Illuminate\Queue\SerializesModels;
+
+      class SendMessageToEndUser extends Mailable
+     {
+    use Queueable, SerializesModels;
+
+    public $senderMessage = '';
+    public $customer_name = '';
+    public $url = '';
+    public $mailData;
+    /**
+     * Create a new message instance.
+     */
+    public function __construct($customer_name, $senderMessage, $mailData) {
+        $this->customer_name = $customer_name;
+        $this->senderMessage = $senderMessage;
+        $this->mailData = $mailData;
+    }
+
+    /**
+     * Get the message envelope.
+     */
+    public function envelope(): Envelope
+    {
+        return new Envelope(
+            subject: 'Send Message To End User',
+        );
+    }
+
+    /**
+     * Get the message content definition.
+     */
+    public function content(): Content
+    {
+        return new Content(
+          //  markdown: 'SendMessageToEndUser',
+                markdown: 'webapp.contact.reply_email',
+        );
+    }
+
+    /**
+     * Get the attachments for the message.
+     *
+     * @return array<int, \Illuminate\Mail\Mailables\Attachment>
+     */
+    public function attachments(): array
+    {
+        return [];
+    }
+}
+
+
+Step 8: Make View File for Email Body (Two Part)
+  
+      Part — 8.1: Create Blade View for Send Email to Admin
+
+      resources/views/email_to_admin.blade.php
+
+      @component('mail::message')
+      # Name: {{ $name }}
+      # Email: {{ $email }}<br>
+      Subject: {{ $sub }} <br><br>
+      Message:<br> {{ $mess }}
+      {{ - @component('mail::button', '$url')
+      Visit Our Website
+      @endcomponent - }}
+      Thanks,
+      {{ config('app.name') }}
+      @endcomponent
+
+      Part — 8.2: Create Blade View for Send Reply Email to User
+
+      resources/views/reply_email.blade.php. 
+
+      @component('mail::message')
+      # Hi {{ $name }},
+      {{ - # {{ $senderMessage }} - }}
+      Receive your email. I will try quicly answer.
+      @component('mail::button', ['url' => $mailData['url']])
+      Visit Our Website
+      @endcomponent
+      Thanks,
+      {{ config('app.name') }}
+      @endcomponent
+
+Step 9: Create a contact blade template
+
+                 <form method="POST" action="{{ route('contact.store') }}" id="contactUSForm" enctype="multipart/form-data">
+                            {{ csrf_field() }}
+                            <div class="row">
+                                <div class="col-6">
+                                    <div class="form-group">
+                                        <label>{{ __('Your Name') }} <span class="text-danger">*</span></label>
+                                        <input name="customer_name" type="text" placeholder="">
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-group">
+                                        <label>{{ __('Your Subjects') }} <span class="text-danger">*</span></label>
+                                        <input name="subject" type="text" placeholder="">
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-group">
+                                        <label>{{ __('Your Email') }} <span class="text-danger">*</span></label>
+                                        <input name="customer_email" type="email" placeholder="">
+                                    </div>	
+                                </div>
+                                <div class="col-6">
+                                    <div class="form-group">
+                                        <label>{{ __('Your Phone') }} <span class="text-danger">*</span></label>
+                                        <input name="phone" type="text" placeholder="">
+                                    </div>	
+                                </div>
+                                <div class="col-12 mt-3">
+                                    <div class="form-group message">
+                                        <label>{{ __('Your message') }} <span class="text-danger">*</span> </label><span class="float-end">{{ __('Max: 400 Character') }}</span>
+                                        <textarea name="message" id="message" rows="4"></textarea>
+                                        <span id="charCount">0</span> {{ __('characters') }}
+                                    </div>
+                                </div>
+
+                                <div class="row mt-3">
+                                    <div class="col-12">
+                                        <label for="customer_file" class="form-label">
+                                            {{ __('Upload Your Documente') }} <br>
+                                            {{ __('Alloved: pdf, doc, docx, txt, xlsx, csv, zip, jpg, png, jpeg, svg / Max File size: 1MB') }}
+                                        </label>
+                                        <input type="file" name="customer_file" id="customer_file"/>
+                                    </div>
+                                </div>
+
+                                <div class="col-12">
+                                    <div class="form-group button mt-5">
+                                        <button type="submit" class="btn ">{{ __('Send Message') }}</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+
+   Add this in script area for counting how many character or letter is frei
+
+   <script>
+   document.addEventListener('DOMContentLoaded', function () {
+   var textarea = document.getElementById('message');
+   var charCount = document.getElementById('charCount');
+
+   textarea.addEventListener('input', function () {
+    charCount.textContent = textarea.value.length;
+    });
+   });
+</script>
+
+
+                                                      Final Step: Run Laravel App.
+
+
+
+
+
+
+
+
+
+
+
+
